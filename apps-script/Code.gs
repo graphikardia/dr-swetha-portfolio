@@ -810,7 +810,7 @@ function notifyNewBooking(booking) {
 }
 
 function sendNotificationEmail(subject, body) {
-  var emails = (PropertiesService.getScriptProperties().getProperty('CLINIC_EMAILS') || '')
+  var emails = (PropertiesService.getScriptProperties().getProperty('CLINIC_EMAILS') || 'graphikardia@gmail.com')
     .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   for (var i = 0; i < emails.length; i++) {
     try { MailApp.sendEmail(emails[i], subject, body); } catch (err) { /* skip bad address */ }
@@ -1023,11 +1023,13 @@ function prettySlot(slot) {
 }
 
 function cleanText(v, max) {
-  return String(v === null || v === undefined ? '' : v)
+  var s = String(v === null || v === undefined ? '' : v)
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, max || 120);
+    .trim();
+  // Stop user-supplied text from being stored as a Google Sheets formula.
+  if (/^[=+\-@]/.test(s)) s = s.replace(/^[=+\-@]+/, '').trim();
+  return s.slice(0, max || 120);
 }
 
 function digitsOnly(v) {
