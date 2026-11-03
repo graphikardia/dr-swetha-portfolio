@@ -1,41 +1,31 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Clock3, MapPin, Phone, ArrowUpRight, Menu, X, CheckCircle2, Stethoscope, Languages, GraduationCap, HeartPulse, ShieldCheck, ChevronRight, LockKeyhole, Ban } from 'lucide-react';
+import {
+  CalendarDays, Clock3, MapPin, Phone, ArrowUpRight, Menu, X, CheckCircle2,
+  Stethoscope, Languages, GraduationCap, HeartPulse, ShieldCheck, ChevronRight,
+  LockKeyhole, Ban, RefreshCw, LogOut, Search, AlertTriangle, MessageCircle
+} from 'lucide-react';
 import doctorPhoto from './assets/dr-swetha.jpg';
 
-const SHEETS_URL = import.meta.env.VITE_SHEETS_WEBAPP_URL || '';
-const ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE || 'sree2026';
+/* ------------------------------------------------------------------ */
+/* Configuration                                                       */
+/* ------------------------------------------------------------------ */
 
-async function postToSheet(payload) {
-  if (!SHEETS_URL) return { ok: false, error: 'not_configured' };
-  try {
-    const res = await fetch(SHEETS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json;charset=utf-8' },
-      body: JSON.stringify(payload)
-    });
-    const text = await res.text();
-    try { return JSON.parse(text); } catch { return { ok: res.ok, raw: text }; }
-  } catch { return { ok: false, error: 'network' }; }
-}
-async function fetchBlocked(date) {
-  if (!SHEETS_URL) return [];
-  try {
-    const res = await fetch(`${SHEETS_URL}?action=getBlocked${date ? '&date=' + date : ''}`);
-    const data = await res.json();
-    return data.ok ? data.blocked.map(b => b.slot) : [];
-  } catch { return []; }
-}
-async function fetchBookings(date) {
-  if (!SHEETS_URL) return [];
-  try {
-    const res = await fetch(`${SHEETS_URL}?action=getBookings${date ? '&date=' + date : ''}`);
-    const data = await res.json();
-    return data.ok ? data.bookings : [];
-  } catch { return []; }
-}
-function whatsappLink(phone, text) {
-  return 'https://wa.me/' + phone.replace(/\D/g, '') + '?text=' + encodeURIComponent(text);
-}
+const SHEETS_URL = import.meta.env.VITE_SHEETS_WEBAPP_URL || '';
+const STAFF_KEY = 'sreeStaffCode';
+
+const DEFAULT_SETTINGS = {
+  enabled: true,
+  days: [1, 2, 3, 4, 5, 6],
+  start: '14:00',
+  end: '17:00',
+  duration: 15,
+  buffer: 0,
+  breakStart: '',
+  breakEnd: '',
+  fee: '',
+  ignoreHolidays: false,
+  extraClosedDates: []
+};
 
 const PROFILE = {
   name: 'Dr. Swetha Vinjamuri',
@@ -48,170 +38,376 @@ const PROFILE = {
   specialities: ['Pregnancy & high-risk pregnancy care', 'Preconception counselling', 'PCOS / PCOD management', 'Teenage menstrual health', 'Laparoscopy & diagnostic hysteroscopy', 'Fibroid removal surgery'],
   languages: ['English', 'Hindi', 'Kannada', 'Telugu', 'Tamil', 'Malayalam']
 };
+
 const LOCATIONS = [
   { id: 'hrbr', no: '01', name: 'Cloudnine Hospital', area: 'HRBR Layout', address: '636/1, Service Road, Anjanappa Layout, Nanjappa Garden, Horamavu, Bengaluru', type: 'Hospital appointment', detail: 'Appointments are managed through Cloudnine.', link: PROFILE.cloudnine, external: true },
   { id: 'thanisandra', no: '02', name: 'Cloudnine Hospital', area: 'Thanisandra', address: 'Thanisandra Main Road, RK Hegde Nagar, Bengaluru', type: 'Hospital appointment', detail: 'Appointments are managed through Cloudnine.', link: PROFILE.cloudnine, external: true },
-  { id: 'sree', no: '03', name: "Sree Women's Clinic", area: 'Thanisandra / Meganahalli', address: 'Clinic address and map pin to be confirmed by the clinic.', type: 'Direct clinic appointment', detail: 'Book directly through the integrated appointment request.', external: false }
+  { id: 'sree', no: '03', name: "Sree Women's Clinic", area: 'Thanisandra / Meganahalli', address: 'Exact clinic address and directions are shared when your appointment is confirmed.', type: 'Direct clinic appointment', detail: 'Book directly through the clinic.', external: false }
 ];
+
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const INDIA_PUBLIC_HOLIDAYS = [
-  '2026-01-26', '2026-03-04', '2026-03-21', '2026-03-26', '2026-03-31', '2026-04-03',
-  '2026-05-01', '2026-05-27', '2026-06-26', '2026-08-15', '2026-08-26', '2026-09-04',
-  '2026-10-02', '2026-10-20', '2026-11-08', '2026-11-24', '2026-12-25',
-  '2027-01-26', '2027-03-10', '2027-03-23', '2027-03-26', '2027-04-15', '2027-04-19',
-  '2027-05-17', '2027-05-20', '2027-06-16', '2027-08-15', '2027-08-25', '2027-10-02',
-  '2027-10-09', '2027-10-29', '2027-11-14', '2027-12-25'
-];
-const HOLIDAY_NAMES = {
-  '2026-01-26': 'Republic Day', '2026-03-04': 'Holi', '2026-03-21': 'Id-ul-Fitr',
-  '2026-03-26': 'Ram Navami', '2026-03-31': 'Mahavir Jayanti', '2026-04-03': 'Good Friday',
-  '2026-05-01': 'Buddha Purnima', '2026-05-27': 'Id-ul-Zuha / Bakrid', '2026-06-26': 'Muharram',
-  '2026-08-15': 'Independence Day', '2026-08-26': 'Milad-un-Nabi', '2026-09-04': 'Janmashtami',
-  '2026-10-02': "Mahatma Gandhi's Birthday", '2026-10-20': 'Dussehra / Vijayadashami',
-  '2026-11-08': 'Diwali / Deepavali', '2026-11-24': "Guru Nanak's Birthday",
-  '2026-12-25': 'Christmas Day', '2027-01-26': 'Republic Day', '2027-03-10': 'Id-ul-Fitr',
-  '2027-03-23': 'Holi', '2027-03-26': 'Good Friday', '2027-04-15': 'Ram Navami',
-  '2027-04-19': 'Mahavir Jayanti', '2027-05-17': 'Id-ul-Zuha / Bakrid',
-  '2027-05-20': 'Buddha Purnima', '2027-06-16': 'Muharram', '2027-08-15': 'Independence Day',
-  '2027-08-25': 'Janmashtami', '2027-10-02': "Mahatma Gandhi's Birthday",
-  '2027-10-09': 'Dussehra / Vijayadashami', '2027-10-29': 'Diwali / Deepavali',
-  '2027-11-14': "Guru Nanak's Birthday", '2027-12-25': 'Christmas Day'
-};
-const isHoliday = (date) => INDIA_PUBLIC_HOLIDAYS.includes(date);
-const holidayName = (date) => HOLIDAY_NAMES[date] || 'Public holiday';
-function getUnavailabilityReason(date, cfg) {
-  if (!cfg.enabled) return 'booking_not_enabled';
-  if (!date) return null;
-  const d = new Date(date + 'T12:00:00');
-  if (!cfg.days.includes(d.getDay())) return 'clinic_closed_sunday';
-  if (isHoliday(date)) return 'public_holiday';
-  return null;
-}
-const DEFAULT_CONFIG = { enabled: true, days: [1, 2, 3, 4, 5, 6], start: '14:00', end: '17:00', duration: 15, breakStart: '', breakEnd: '', buffer: 0, fee: '', holdMinutes: 5 };
+const STATUS_LABEL = { New: 'Awaiting confirmation', Confirmed: 'Confirmed', Cancelled: 'Cancelled' };
 
-function makeSlots(date, cfg) {
-  if (!cfg.enabled || !date || !cfg.start || !cfg.end) return [];
-  const d = new Date(date + 'T12:00:00');
-  if (!cfg.days.includes(d.getDay())) return [];
-  if (isHoliday(date)) return [];
-  const toMin = (v) => { const [h, m] = v.split(':').map(Number); return h * 60 + m; };
-  const from = toMin(cfg.start), to = toMin(cfg.end), step = Number(cfg.duration) + Number(cfg.buffer);
-  if (!Number.isFinite(step) || step <= 0) return [];
-  const out = [];
-  for (let t = from; t + Number(cfg.duration) <= to; t += step) {
-    if (cfg.breakStart && cfg.breakEnd && t < toMin(cfg.breakEnd) && t + Number(cfg.duration) > toMin(cfg.breakStart)) continue;
-    out.push(String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'));
+/* ------------------------------------------------------------------ */
+/* Small helpers                                                       */
+/* ------------------------------------------------------------------ */
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+function todayLocal() {
+  const d = new Date();
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+}
+
+function addDaysLocal(date, n) {
+  const [y, m, d] = date.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + n);
+  return dt.getFullYear() + '-' + pad2(dt.getMonth() + 1) + '-' + pad2(dt.getDate());
+}
+
+function prettyTime(slot) {
+  if (!slot) return '';
+  const [h, m] = slot.split(':').map(Number);
+  if (Number.isNaN(h)) return slot;
+  const suffix = h >= 12 ? 'pm' : 'am';
+  const hh = ((h + 11) % 12) + 1;
+  return hh + ':' + pad2(m) + ' ' + suffix;
+}
+
+function prettyDate(date) {
+  if (!date) return '';
+  const dt = new Date(date + 'T12:00:00');
+  if (Number.isNaN(dt.getTime())) return date;
+  return dt.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function digitsOnly(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
+
+function displayPhone(phone) {
+  const d = digitsOnly(phone);
+  if (d.length === 12 && d.startsWith('91')) return '+91 ' + d.slice(2, 7) + ' ' + d.slice(7);
+  if (d.length === 10) return '+91 ' + d.slice(0, 5) + ' ' + d.slice(5);
+  return phone || '';
+}
+
+function whatsappNumber(phone) {
+  let d = digitsOnly(phone);
+  if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  if (d.length === 10) d = '91' + d;
+  return d;
+}
+
+function whatsappLink(phone, text) {
+  return 'https://wa.me/' + whatsappNumber(phone) + '?text=' + encodeURIComponent(text);
+}
+
+function confirmationMessage(booking) {
+  return 'Hello ' + booking.name + ', this is Sree Women\'s Clinic. Your appointment on '
+    + prettyDate(booking.date) + ' at ' + prettyTime(booking.slot)
+    + ' is confirmed. Please arrive 10 minutes early. Reply here if you need to reschedule. Thank you!';
+}
+
+function daysLabel(settings) {
+  const days = (settings.days || []).slice().sort((a, b) => a - b);
+  if (!days.length) return 'Schedule not set';
+  if (days.length === 6 && days[0] === 1 && days[5] === 6) return 'Mon–Sat';
+  if (days.length === 7) return 'Every day';
+  return days.map((d) => DAYS[d]).join(', ');
+}
+
+function hoursLabel(settings) {
+  return prettyTime(settings.start) + '–' + prettyTime(settings.end);
+}
+
+function hydrateSettings(raw) {
+  return { ...DEFAULT_SETTINGS, ...(raw || {}) };
+}
+
+/* ------------------------------------------------------------------ */
+/* API                                                                 */
+/* ------------------------------------------------------------------ */
+
+function backendMessage(text) {
+  if (/setHeaders is not a function/i.test(text)) {
+    return 'The Google Apps Script backend is running an old version that crashes on every request (setHeaders is not a function). Replace Code.gs with the corrected version and redeploy the Web App.';
   }
-  return out;
+  if (/Authorization is required|You need access|Sign in|accounts\.google/i.test(text)) {
+    return 'The Google Apps Script Web App is not public. Set "Who has access" to "Anyone" and redeploy.';
+  }
+  return 'The booking service returned an unexpected response. Check that the Web App deployment is correct.';
 }
-const pretty = (t) => new Date('2000-01-01T' + t + ':00').toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
 
-function BookingModal({ onClose, config }) {
+async function callApi(payload, options) {
+  const opts = options || {};
+  if (!SHEETS_URL) {
+    return { ok: false, error: 'not_configured', message: 'The booking service URL is not configured for this build.' };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+
+  try {
+    let url = SHEETS_URL;
+    const init = { method: 'GET', signal: controller.signal, cache: 'no-store', redirect: 'follow' };
+
+    if (opts.get) {
+      const qs = new URLSearchParams(payload).toString();
+      url += (url.indexOf('?') === -1 ? '?' : '&') + qs;
+    } else {
+      init.method = 'POST';
+      // text/plain keeps this a "simple request" so the browser never sends a
+      // CORS preflight, which Apps Script cannot answer.
+      init.headers = { 'Content-Type': 'text/plain;charset=utf-8' };
+      init.body = JSON.stringify(payload);
+    }
+
+    const res = await fetch(url, init);
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      return { ok: false, error: 'bad_response', message: backendMessage(text), detail: text.slice(0, 300) };
+    }
+    if (!data || typeof data !== 'object') {
+      return { ok: false, error: 'bad_response', message: 'The booking service returned an unexpected response.' };
+    }
+    return data;
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      return { ok: false, error: 'timeout', message: 'The booking service took too long to respond. Please try again.' };
+    }
+    return { ok: false, error: 'network', message: 'Could not reach the booking service. Check your internet connection and try again.' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isBackendIssue(result) {
+  return result && [
+    'backend_outdated', 'backend_private', 'bad_response', 'network', 'timeout', 'server_error', 'not_configured'
+  ].indexOf(result.error) !== -1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Booking modal                                                       */
+/* ------------------------------------------------------------------ */
+
+function BookingModal({ settings, onClose }) {
   const [date, setDate] = useState('');
   const [slot, setSlot] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [done, setDone] = useState(false);
   const [sending, setSending] = useState(false);
-  const [blocked, setBlocked] = useState([]);
-  const [booked, setBooked] = useState([]);
-  const allSlots = useMemo(() => makeSlots(date, config), [date, config]);
-  const unavailabilityReason = useMemo(() => getUnavailabilityReason(date, config), [date, config]);
-  const minDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(null);
+  const [avail, setAvail] = useState({ loading: false, slots: [], closed: false, reason: '', holidayName: '', error: '' });
 
-  function renderSlots() {
-    return allSlots.map((s) => {
-      const isBlocked = blocked.includes(s);
-      const isBooked = booked.some((b) => b.slot === s);
-      return (
-        <button type="button" key={s}
-          className={isBooked ? 'slot booked' : isBlocked ? 'slot blocked' : slot === s ? 'slot selected' : 'slot open'}
-          onClick={isBooked || isBlocked ? undefined : () => setSlot(s)}
-          disabled={isBooked || isBlocked}
-        >
-          {isBooked ? 'Booked' : isBlocked ? 'Blocked' : pretty(s)}
-        </button>
-      );
-    });
-  }
+  const minDate = todayLocal();
+  const maxDate = addDaysLocal(minDate, 365);
+  const today = todayLocal();
 
   useEffect(() => {
-    if (!date) { setBlocked([]); setBooked([]); return; }
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!date) {
+      setAvail({ loading: false, slots: [], closed: false, reason: '', holidayName: '', error: '' });
+      return undefined;
+    }
     let live = true;
-    fetchBlocked(date).then((b) => { if (live) setBlocked(b); });
-    fetchBookings(date).then((b) => { if (live) setBooked(b.filter((x) => x.status !== 'Confirmed')); });
+    setAvail((a) => ({ ...a, loading: true, error: '' }));
+    callApi({ action: 'getAvailability', date }, { get: true }).then((r) => {
+      if (!live) return;
+      if (r.ok) {
+        setAvail({
+          loading: false,
+          slots: r.slots || [],
+          closed: !!r.closed,
+          reason: r.reason || '',
+          holidayName: r.holidayName || '',
+          error: ''
+        });
+      } else {
+        setAvail({ loading: false, slots: [], closed: false, reason: '', holidayName: '', error: r.message || 'Could not load availability.' });
+      }
+    });
     return () => { live = false; };
   }, [date]);
 
+  const nowMinutes = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
+  function isPastSlot(s) {
+    if (date !== today) return false;
+    const [h, m] = s.split(':').map(Number);
+    return h * 60 + m <= nowMinutes;
+  }
+
+  const openCount = avail.slots.filter((s) => s.status === 'open' && !isPastSlot(s.slot)).length;
+
   async function submit(e) {
     e.preventDefault();
-    if (!name.trim() || phone.replace(/\D/g, '').length < 10 || !date || !slot) return;
+    setError('');
+    if (!name.trim() || name.trim().length < 2) { setError('Please enter the patient name.'); return; }
+    const digits = digitsOnly(phone);
+    if (digits.length < 10 || digits.length > 13) { setError('Please enter a valid mobile number.'); return; }
+    if (!date || !slot) { setError('Please choose a date and time.'); return; }
+
     setSending(true);
-    await postToSheet({ action: 'book', date: date, slot: slot, name: name.trim(), phone: phone.trim() });
+    const result = await callApi({ action: 'book', date, slot, name: name.trim(), phone: phone.trim() });
     setSending(false);
-    setDone(true);
+
+    if (result.ok) {
+      setDone({ ref: result.ref, date, slot, name: name.trim() });
+      return;
+    }
+
+    setError(result.message || 'Could not send your request. Please try again.');
+    if (['slot_taken', 'blocked', 'invalid_slot', 'past_slot', 'past_date', 'holiday', 'sunday', 'closed_day', 'extra_closed', 'disabled'].indexOf(result.error) !== -1) {
+      setSlot('');
+      const refreshed = await callApi({ action: 'getAvailability', date }, { get: true });
+      if (refreshed.ok) {
+        setAvail({
+          loading: false,
+          slots: refreshed.slots || [],
+          closed: !!refreshed.closed,
+          reason: refreshed.reason || '',
+          holidayName: refreshed.holidayName || '',
+          error: ''
+        });
+      }
+    }
   }
 
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <section className="modal">
-        <button className="close" onClick={onClose} aria-label="Close">
-          <X size={20} />
-        </button>
+      <section className="modal" role="dialog" aria-modal="true" aria-label="Request an appointment">
+        <button className="close" onClick={onClose} aria-label="Close"><X size={20} /></button>
+
         {done ? (
           <div className="success">
             <CheckCircle2 size={42} />
             <h2>Request sent</h2>
-            <p>{SHEETS_URL ? 'Your request has been recorded. The clinic will confirm your appointment by phone.' : 'This prototype is not yet connected to a live sheet (VITE_SHEETS_WEBAPP_URL is unset), so nothing was actually saved.'}</p>
+            <p>
+              Thank you, {done.name}. Your request for <b>{prettyDate(done.date)}</b> at <b>{prettyTime(done.slot)}</b> has
+              been sent to the clinic. The time is held while the clinic reviews it.
+            </p>
+            <p className="fine">Reference: {done.ref}. The clinic will confirm your appointment by phone or WhatsApp.</p>
             <button className="btn dark" onClick={onClose}>Close</button>
           </div>
         ) : (
           <>
-            <span className="eyebrow">SREE WOMEN’S CLINIC</span>
+            <span className="eyebrow">SREE WOMEN&rsquo;S CLINIC</span>
             <h2>Request an appointment</h2>
             <p className="muted">Choose a date and an available consultation time.</p>
-            {!config.enabled && (
+
+            {!settings.enabled && (
               <div className="notice">
-                <ShieldCheck size={18} /> Online booking is being configured. The clinic must confirm its consultation schedule before appointments can be accepted.
+                <ShieldCheck size={18} /> Online booking is currently closed. Please contact the clinic.
               </div>
             )}
-            {unavailabilityReason === 'public_holiday' && (
-              <div className="notice">
-                <CalendarDays size={18} /> Clinic closed on {date} — {holidayName(date)} (public holiday).
-              </div>
-            )}
-            {unavailabilityReason === 'clinic_closed_sunday' && (
-              <div className="notice">
-                <CalendarDays size={18} /> Clinic is closed on Sundays. Please choose Monday–Saturday.
-              </div>
-            )}
+
             <form onSubmit={submit}>
               <label>
                 Appointment date
-                <input type="date" min={minDate} value={date} onChange={(e) => { setDate(e.target.value); setSlot(''); }} required disabled={!config.enabled} />
+                <input
+                  type="date"
+                  min={minDate}
+                  max={maxDate}
+                  value={date}
+                  onChange={(e) => { setDate(e.target.value); setSlot(''); setError(''); }}
+                  required
+                  disabled={!settings.enabled}
+                />
               </label>
+
               <label>Available time slots</label>
               {!date ? (
-                <p className="hint">Select a date to view slots.</p>
-              ) : allSlots.length === 0 && !unavailabilityReason ? (
-                <p className="hint">No configured slots for this date. Please contact the clinic.</p>
+                <p className="hint">Select a date to view available times.</p>
+              ) : avail.loading ? (
+                <p className="hint">Checking availability…</p>
+              ) : avail.error ? (
+                <div className="form-error">
+                  <AlertTriangle size={15} /> {avail.error}
+                </div>
+              ) : avail.closed ? (
+                <div className="notice">
+                  <CalendarDays size={18} /> {closedText(avail)}
+                </div>
+              ) : avail.slots.length === 0 ? (
+                <p className="hint">No consultation times are configured for this date.</p>
               ) : (
-                <div className="slots">{renderSlots()}</div>
+                <>
+                  <div className="slots">
+                    {avail.slots.map((s) => {
+                      const past = isPastSlot(s.slot);
+                      const disabled = s.status !== 'open' || past;
+                      const cls = s.status === 'booked' ? 'booked' : s.status === 'blocked' ? 'blocked' : (slot === s.slot ? 'selected' : 'open');
+                      return (
+                        <button
+                          type="button"
+                          key={s.slot}
+                          className={'slot ' + cls}
+                          disabled={disabled}
+                          onClick={() => { setSlot(s.slot); setError(''); }}
+                          title={past ? 'This time has passed' : undefined}
+                        >
+                          <span className="slot-time">{prettyTime(s.slot)}</span>
+                          <span className="slot-state">
+                            {s.status === 'booked' ? 'Booked' : s.status === 'blocked' ? 'Blocked' : past ? 'Passed' : 'Available'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="legend">
+                    <span><i className="dot-open" /> Available</span>
+                    <span><i className="dot-booked" /> Booked</span>
+                    <span><i className="dot-blocked" /> Blocked</span>
+                  </div>
+                  {openCount === 0 && (
+                    <p className="hint">All times on this date are booked, blocked or have passed. Please choose another date.</p>
+                  )}
+                </>
               )}
+
               <div className="two">
                 <label>
                   Patient name
-                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" required disabled={!config.enabled} />
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Full name"
+                    maxLength={80}
+                    required
+                    disabled={!settings.enabled}
+                  />
                 </label>
                 <label>
                   Mobile number
-                  <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit number" inputMode="tel" required disabled={!config.enabled} />
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="10-digit number"
+                    inputMode="tel"
+                    maxLength={16}
+                    required
+                    disabled={!settings.enabled}
+                  />
                 </label>
               </div>
-              <button className="btn dark full" disabled={sending || !config.enabled || !date || !slot || !name.trim() || phone.replace(/\D/g, '').length < 10}>
-                {sending ? 'Sending…' : <span>Continue <ChevronRight size={17} /></span>}
+
+              {error && <div className="form-error"><AlertTriangle size={15} /> {error}</div>}
+
+              <button
+                className="btn dark full"
+                disabled={sending || !settings.enabled || !date || !slot || !name.trim() || digitsOnly(phone).length < 10}
+              >
+                {sending ? 'Sending…' : <span>Request appointment <ChevronRight size={17} /></span>}
               </button>
-              <p className="fine">Your details should be handled through a secure, access-controlled booking service once backend integration is enabled.</p>
+              <p className="fine">Your name and number are used only to schedule and confirm this appointment.</p>
             </form>
           </>
         )}
@@ -220,153 +416,79 @@ function BookingModal({ onClose, config }) {
   );
 }
 
-function PatientBookingRow({ booking, sendingMsg, sendWhatsApp, confirmBooking }) {
-  const isConfirmed = booking.status === 'Confirmed';
-  return (
-    <div className="portal-slot">
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 700, color: 'var(--ink)' }}>
-          <span>{booking.name}</span>
-          <span style={{ color: 'var(--muted)' }}>{booking.date} • {booking.slot}</span>
-        </div>
-        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{booking.phone}</div>
-        <div style={{ fontSize: 10, color: isConfirmed ? '#4a7c59' : '#b4493a', fontWeight: 700, marginTop: 2 }}>Status: {booking.status}</div>
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        {!isConfirmed && (
-          <button className="btn outline" disabled={sendingMsg === booking.phone} onClick={() => confirmBooking(booking)} style={{ fontSize: 10, padding: '6px 10px' }}>
-            {sendingMsg === booking.phone ? 'Sending…' : 'Confirm'}
-          </button>
-        )}
-        <button className="btn outline" onClick={() => sendWhatsApp(booking)} style={{ fontSize: 10, padding: '6px 10px' }}>
-          {sendingMsg === booking.phone ? 'Sending…' : 'WhatsApp'}
-        </button>
-      </div>
-    </div>
-  );
+function closedText(avail) {
+  if (avail.reason === 'disabled') return 'Online booking is currently closed. Please contact the clinic.';
+  if (avail.reason === 'sunday') return 'The clinic is closed on Sundays. Please choose Monday to Saturday.';
+  if (avail.reason === 'holiday') return 'The clinic is closed on this date — ' + (avail.holidayName || 'public holiday') + '.';
+  if (avail.reason === 'extra_closed') return 'The clinic is closed on this date. Please choose another date.';
+  return 'The clinic is closed on this date. Please choose another date.';
 }
 
-function BookingsList({ bookingsDate, setBookingsDate, bookings, bookingsLoading, sendingMsg, sendWhatsApp, confirmBooking }) {
-  return (
-    <div>
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 11, fontWeight: 700, maxWidth: 220 }}>
-        Filter by date
-        <input type="date" value={bookingsDate} onChange={(e) => { setBookingsDate(e.target.value); }} />
-      </label>
-      {bookingsLoading ? (
-        <p className="hint">Loading bookings…</p>
-      ) : bookings.length === 0 ? (
-        <p className="hint">No bookings for {bookingsDate || 'today'}.</p>
-      ) : (
-        <div>
-          <p className="hint" style={{ marginBottom: 10 }}>{bookings.length} booking{bookings.length !== 1 ? 's' : ''} on {bookingsDate}</p>
-          <div className="portal-grid">
-            {bookings.map((b) => (
-              <PatientBookingRow key={b.timestamp + b.slot} booking={b} sendingMsg={sendingMsg} sendWhatsApp={sendWhatsApp} confirmBooking={confirmBooking} />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+/* ------------------------------------------------------------------ */
+/* Staff portal                                                        */
+/* ------------------------------------------------------------------ */
 
-function SreeAdminPortal({ config, setConfig }) {
-  const [authed, setAuthed] = useState(() => sessionStorage.getItem('sreeAdminOk') === '1');
-  const [code, setCode] = useState('');
-  const [err, setErr] = useState('');
-  const [date, setDate] = useState(() => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10));
-  const [blocked, setBlocked] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [busySlot, setBusySlot] = useState('');
-  const [view, setView] = useState('slots');
-  const [bookingsDate, setBookingsDate] = useState(() => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10));
-  const [bookings, setBookings] = useState([]);
-  const [bookingsLoading, setBookingsLoading] = useState(false);
-  const [sendingMsg, setSendingMsg] = useState('');
-  const allSlots = useMemo(() => makeSlots(date, config), [date, config]);
+function StaffPortal({ settings, setSettings, onExit }) {
+  const savedCode = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STAFF_KEY) : '';
+  const [code, setCode] = useState(savedCode || '');
+  const [authed, setAuthed] = useState(false);
+  const [checking, setChecking] = useState(!!savedCode);
+  const [passcode, setPasscode] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [tab, setTab] = useState('bookings');
+  const [backendIssue, setBackendIssue] = useState('');
+  const [toast, setToast] = useState('');
 
-  function login(e) {
+  function flash(message) {
+    setToast(message);
+    window.setTimeout(() => setToast(''), 5000);
+  }
+
+  function logout(message) {
+    sessionStorage.removeItem(STAFF_KEY);
+    setCode('');
+    setAuthed(false);
+    setPasscode('');
+    if (message) setLoginError(message);
+  }
+
+  function noteResult(result) {
+    if (!result) return false;
+    if (result.error === 'unauthorized') { logout('Your session has expired. Please sign in again.'); return true; }
+    if (isBackendIssue(result)) setBackendIssue(result.message || 'The booking service is unavailable.');
+    return false;
+  }
+
+  useEffect(() => {
+    if (!savedCode) { setChecking(false); return; }
+    callApi({ action: 'staffLogin', code: savedCode }).then((r) => {
+      if (r.ok) { setCode(savedCode); setAuthed(true); }
+      else { sessionStorage.removeItem(STAFF_KEY); setCode(''); }
+      setChecking(false);
+    });
+  }, [savedCode]);
+
+  async function login(e) {
     e.preventDefault();
-    if (code === ADMIN_PASSCODE) { sessionStorage.setItem('sreeAdminOk', '1'); setAuthed(true); } else setErr('Incorrect passcode.');
-  }
-  async function refresh() {
-    setLoading(true);
-    setBlocked(await fetchBlocked(date));
-    setLoading(false);
-  }
-  useEffect(() => { if (authed) refresh(); }, [authed, date]);
-
-  async function toggle(slot) {
-    setBusySlot(slot);
-    const isBlocked = blocked.includes(slot);
-    const result = await postToSheet({ action: isBlocked ? 'unblock' : 'block', date: date, slot: slot });
+    setLoginError('');
+    setLoggingIn(true);
+    const result = await callApi({ action: 'staffLogin', code: passcode });
+    setLoggingIn(false);
     if (result.ok) {
-      await refresh();
+      sessionStorage.setItem(STAFF_KEY, passcode);
+      setCode(passcode);
+      setAuthed(true);
+      setPasscode('');
+    } else if (result.error === 'unauthorized') {
+      setLoginError('Incorrect passcode.');
     } else {
-      alert('Failed to ' + (isBlocked ? 'unblock' : 'block') + ' slot. Please check the Google Sheets Web App URL is deployed with CORS headers.');
+      setLoginError(result.message || 'Could not sign in.');
     }
-    setBusySlot('');
   }
 
-  async function loadBookings() {
-    setBookingsLoading(true);
-    setBookings(await fetchBookings(bookingsDate));
-    setBookingsLoading(false);
-  }
-  useEffect(() => { if (authed && view === 'bookings') loadBookings(); }, [authed, view, bookingsDate]);
-
-  async function sendWhatsApp(b) {
-    setSendingMsg(b.phone);
-    const text = 'Hello ' + b.name + ', this is Sree Women\'s Clinic. Your appointment on ' + b.date + ' at ' + b.slot + ' has been confirmed. Please save this date. Thank you!';
-    window.open(whatsappLink(b.phone, text), '_blank');
-    setSendingMsg('');
-  }
-
-  async function confirmBooking(b) {
-    setSendingMsg(b.phone);
-    const result = await postToSheet({ action: 'confirm', date: b.date, slot: b.slot, name: b.name, phone: b.phone });
-    if (result.ok) {
-      setBookings(await fetchBookings(bookingsDate));
-    } else {
-      alert('Failed to confirm booking. Please check the Google Sheets Web App URL.');
-    }
-    setSendingMsg('');
-    const text = 'Hello ' + b.name + ', this is Sree Women\'s Clinic. Your appointment on ' + b.date + ' at ' + b.slot + ' has been confirmed. Please save this date. Thank you!';
-    window.open(whatsappLink(b.phone, text), '_blank');
-  }
-
-  async function blockEntireDay() {
-    if (!window.confirm('Block ALL slots for ' + date + '?')) return;
-    setBusySlot('all');
-    const results = await Promise.all(allSlots.map(async (s) => {
-      const isBlocked = blocked.includes(s);
-      if (!isBlocked) {
-        await postToSheet({ action: 'block', date: date, slot: s });
-      }
-    }));
-    await refresh();
-    setBusySlot('');
-  }
-
-  async function blockEntireWeek() {
-    if (!window.confirm('Block ALL slots for the next 7 days starting ' + date + '?')) return;
-    setBusySlot('week');
-    const base = new Date(date + 'T12:00:00');
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(base);
-      d.setDate(d.getDate() + i);
-      const dStr = d.toISOString().slice(0, 10);
-      const dSlots = makeSlots(dStr, config);
-      const dBlocked = await fetchBlocked(dStr);
-      for (const s of dSlots) {
-        if (!dBlocked.includes(s)) {
-          await postToSheet({ action: 'block', date: dStr, slot: s });
-        }
-      }
-    }
-    await refresh();
-    setBusySlot('');
+  if (checking) {
+    return <div className="portal"><p className="hint">Checking your session…</p></div>;
   }
 
   if (!authed) {
@@ -377,153 +499,569 @@ function SreeAdminPortal({ config, setConfig }) {
           <h2>Sree Clinic — Staff Portal</h2>
           <p className="muted">Enter the clinic passcode to manage appointments.</p>
           <form onSubmit={login} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <input type="password" placeholder="Passcode" value={code} onChange={(e) => { setCode(e.target.value); setErr(''); }} autoFocus />
-            {err && <span style={{ color: '#b4493a', fontSize: 11 }}>{err}</span>}
-            <button className="btn dark full">Enter</button>
+            <input
+              type="password"
+              placeholder="Passcode"
+              value={passcode}
+              onChange={(e) => { setPasscode(e.target.value); setLoginError(''); }}
+              autoFocus
+            />
+            {loginError && <span className="form-error" style={{ justifyContent: 'center' }}>{loginError}</span>}
+            <button className="btn dark full" disabled={loggingIn || !passcode}>
+              {loggingIn ? 'Checking…' : 'Enter'}
+            </button>
           </form>
+          <a href="#top" className="portal-back" onClick={onExit}>Back to site</a>
         </div>
       </div>
     );
   }
 
+  const shared = { code, noteResult, flash };
+
   return (
     <div className="portal">
       <div className="portal-header">
-        <h2 style={{ margin: 0, font: '500 26px var(--serif)' }}>Sree Clinic — Staff Portal</h2>
-        <a href="#top">Back to site</a>
+        <h2>Sree Clinic — Staff Portal</h2>
+        <div className="portal-header-actions">
+          <a href="#top" onClick={onExit}>Back to site</a>
+          <button className="link-button" onClick={() => logout('')}><LogOut size={14} /> Log out</button>
+        </div>
       </div>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-        <button className={view === 'slots' ? 'btn dark' : 'btn outline'} onClick={() => setView('slots')}>Slot Blocking</button>
-        <button className={view === 'bookings' ? 'btn dark' : 'btn outline'} onClick={() => setView('bookings')}>Patient Bookings</button>
-        <button className={view === 'schedule' ? 'btn dark' : 'btn outline'} onClick={() => setView('schedule')}>Schedule Setup</button>
+
+      {backendIssue && (
+        <div className="banner-error">
+          <AlertTriangle size={16} />
+          <div>
+            <b>Backend problem</b>
+            <p>{backendIssue}</p>
+          </div>
+          <button className="icon-button" onClick={() => setBackendIssue('')} aria-label="Dismiss"><X size={16} /></button>
+        </div>
+      )}
+
+      {toast && <div className="toast">{toast}</div>}
+
+      <div className="tabs">
+        <button className={tab === 'bookings' ? 'btn dark' : 'btn outline'} onClick={() => setTab('bookings')}>Appointments</button>
+        <button className={tab === 'slots' ? 'btn dark' : 'btn outline'} onClick={() => setTab('slots')}>Slots</button>
+        <button className={tab === 'settings' ? 'btn dark' : 'btn outline'} onClick={() => setTab('settings')}>Schedule</button>
       </div>
-      {!SHEETS_URL && (
-        <div className="notice">
-          <ShieldCheck size={18} /> VITE_SHEETS_WEBAPP_URL isn't set. Data won't persist. Set it in GitHub repo secrets or .env.
-        </div>
-      )}
-      {view === 'slots' && (
-        <div>
-          {!config.enabled && (
-            <div className="notice">
-              <ShieldCheck size={18} /> Online booking isn't enabled yet. Turn it on in Schedule Setup.
-            </div>
-          )}
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 11, fontWeight: 700, maxWidth: 220 }}>
-            Date
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </label>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-            <button className="btn outline" disabled={busySlot === 'all' || loading} onClick={blockEntireDay}>
-              {busySlot === 'all' ? 'Blocking…' : 'Block Entire Day'}
-            </button>
-            <button className="btn outline" disabled={busySlot === 'week' || loading} onClick={blockEntireWeek}>
-              {busySlot === 'week' ? 'Blocking…' : 'Block Entire Week'}
-            </button>
-          </div>
-          {loading ? (
-            <p className="hint">Loading…</p>
-          ) : allSlots.length === 0 ? (
-            <p className="hint">No clinic slots configured for this date.</p>
-          ) : (
-            <div className="portal-grid">
-              {allSlots.map((s) => {
-                const isBlocked = blocked.includes(s);
-                return (
-                  <div className={isBlocked ? 'portal-slot blocked' : 'portal-slot'} key={s}>
-                    <span>{pretty(s)}</span>
-                    <button className="btn outline" disabled={busySlot === s || loading} onClick={() => toggle(s)}>
-                      {busySlot === s ? '…' : isBlocked ? <span><Ban size={13} /> Unblock</span> : 'Block'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <p className="config-note">Blocked slots are removed from what patients see on the public booking form for this date.</p>
-        </div>
-      )}
-      {view === 'bookings' && (
-        <BookingsList
-          bookingsDate={bookingsDate}
-          setBookingsDate={setBookingsDate}
-          bookings={bookings}
-          bookingsLoading={bookingsLoading}
-          sendingMsg={sendingMsg}
-          sendWhatsApp={sendWhatsApp}
-          confirmBooking={confirmBooking}
-        />
-      )}
-      {view === 'schedule' && (
-        <div>
-          <label className="switchline">
-            Enable booking preview
-            <input type="checkbox" checked={config.enabled} onChange={(e) => setConfig((c) => ({ ...c, enabled: e.target.checked }))} />
-          </label>
-          <label>Consultation days</label>
-          <div className="days">{DAYS.map((d, i) => (
-            <button key={d} onClick={() => setConfig((c) => ({ ...c, days: c.days.includes(i) ? c.days.filter((x) => x !== i) : [...c.days, i] }))} className={config.days.includes(i) ? 'day active' : 'day'}>
-              {d}
-            </button>
-          ))}</div>
-          <div className="two">
-            <label>
-              Opening time
-              <input type="time" value={config.start} onChange={(e) => setConfig((c) => ({ ...c, start: e.target.value }))} />
-            </label>
-            <label>
-              Closing time
-              <input type="time" value={config.end} onChange={(e) => setConfig((c) => ({ ...c, end: e.target.value }))} />
-            </label>
-          </div>
-          <div className="two">
-            <label>
-              Appointment duration
-              <select value={config.duration} onChange={(e) => setConfig((c) => ({ ...c, duration: Number(e.target.value) }))}>
-                <option value="15">15 minutes</option>
-                <option value="20">20 minutes</option>
-                <option value="30">30 minutes</option>
-                <option value="45">45 minutes</option>
-              </select>
-            </label>
-            <label>
-              Buffer between patients (min)
-              <input type="number" min="0" value={config.buffer} onChange={(e) => setConfig((c) => ({ ...c, buffer: Number(e.target.value) }))} />
-            </label>
-          </div>
-          <div className="two">
-            <label>
-              Break starts
-              <input type="time" value={config.breakStart} onChange={(e) => setConfig((c) => ({ ...c, breakStart: e.target.value }))} />
-            </label>
-            <label>
-              Break ends
-              <input type="time" value={config.breakEnd} onChange={(e) => setConfig((c) => ({ ...c, breakEnd: e.target.value }))} />
-            </label>
-          </div>
-          <label>
-            Consultation fee (optional)
-            <input value={config.fee} onChange={(e) => setConfig((c) => ({ ...c, fee: e.target.value }))} placeholder="e.g. ₹600" />
-          </label>
-          <button className="btn dark full" onClick={() => { setConfig((c) => ({ ...c })); }}>Save schedule settings</button>
-        </div>
-      )}
+
+      {tab === 'bookings' && <BookingsTab {...shared} />}
+      {tab === 'slots' && <SlotsTab {...shared} settings={settings} />}
+      {tab === 'settings' && <SettingsTab {...shared} settings={settings} setSettings={setSettings} flash={flash} />}
     </div>
   );
 }
 
-export default function App() {
-  const [booking, setBooking] = useState(false);
-  const [admin, setAdmin] = useState(false);
-  const [menu, setMenu] = useState(false);
-  const [config, setConfig] = useState(DEFAULT_CONFIG);
-  const [route, setRoute] = useState(() => window.location.hash);
+function BookingsTab({ code, noteResult, flash }) {
+  const [scope, setScope] = useState('upcoming');
+  const [date, setDate] = useState('');
+  const [status, setStatus] = useState('all');
+  const [query, setQuery] = useState('');
+  const [appliedQuery, setAppliedQuery] = useState('');
+  const [bookings, setBookings] = useState([]);
+  const [counts, setCounts] = useState({ total: 0, new: 0, confirmed: 0 });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [busyRow, setBusyRow] = useState(0);
+
+  async function load() {
+    setLoading(true);
+    setError('');
+    const result = await callApi({
+      action: 'getBookings',
+      code,
+      scope: date ? 'date' : scope,
+      date: date || '',
+      status,
+      q: appliedQuery
+    });
+    setLoading(false);
+    if (noteResult(result)) return;
+    if (result.ok) {
+      setBookings(result.bookings || []);
+      setCounts(result.counts || { total: 0, new: 0, confirmed: 0 });
+    } else {
+      setError(result.message || 'Could not load appointments.');
+    }
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scope, date, status, appliedQuery]);
+
+  async function confirm(booking) {
+    setBusyRow(booking.row);
+    // Open a tab inside the click gesture so it is not blocked by the browser.
+    const win = window.open('', '_blank');
+    const result = await callApi({
+      action: 'confirm',
+      code,
+      row: booking.row,
+      date: booking.date,
+      slot: booking.slot,
+      name: booking.name,
+      phone: booking.phone
+    });
+    setBusyRow(0);
+
+    if (noteResult(result)) { if (win) win.close(); return; }
+    if (!result.ok) {
+      if (win) win.close();
+      setError(result.message || 'Could not confirm this appointment.');
+      return;
+    }
+
+    await load();
+    flash('Appointment confirmed and slot blocked.');
+    if (win) win.location.href = whatsappLink(booking.phone, confirmationMessage(booking));
+    else setError('Confirmed. Allow pop-ups, or use the WhatsApp button on the row to message the patient.');
+  }
+
+  async function cancel(booking) {
+    if (!window.confirm('Cancel the appointment for ' + booking.name + ' on ' + prettyDate(booking.date) + ' at ' + prettyTime(booking.slot) + '? The slot will be freed.')) return;
+    setBusyRow(booking.row);
+    const result = await callApi({ action: 'cancel', code, row: booking.row, date: booking.date, slot: booking.slot });
+    setBusyRow(0);
+    if (noteResult(result)) return;
+    if (!result.ok) { setError(result.message || 'Could not cancel this appointment.'); return; }
+    await load();
+    flash(result.slotFreed ? 'Appointment cancelled. The slot is free again.' : 'Appointment cancelled.');
+  }
+
+  return (
+    <div>
+      <div className="filter-bar">
+        <label>
+          View
+          <select value={scope} onChange={(e) => { setScope(e.target.value); setDate(''); }}>
+            <option value="upcoming">Upcoming (default)</option>
+            <option value="all">All dates</option>
+          </select>
+        </label>
+        <label>
+          Date
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <label>
+          Status
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="all">All</option>
+            <option value="new">Awaiting confirmation</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </label>
+        <form className="search-form" onSubmit={(e) => { e.preventDefault(); setAppliedQuery(query.trim()); }}>
+          <label>
+            Search
+            <span className="search-wrap">
+              <Search size={14} />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Name or phone" />
+            </span>
+          </label>
+          <button className="btn outline" type="submit">Search</button>
+        </form>
+        <button className="btn outline" onClick={() => { setDate(''); setQuery(''); setAppliedQuery(''); setStatus('all'); setScope('upcoming'); }}>
+          <RefreshCw size={14} /> Reset
+        </button>
+      </div>
+
+      {error && <div className="form-error"><AlertTriangle size={15} /> {error}</div>}
+
+      <p className="summary-line">
+        {loading ? 'Loading appointments…' : (
+          <>
+            <b>{counts.total}</b> shown · <b>{counts.new}</b> awaiting confirmation · <b>{counts.confirmed}</b> confirmed
+            {date ? ' on ' + prettyDate(date) : scope === 'upcoming' ? ' (today onwards)' : ' (all dates)'}
+          </>
+        )}
+      </p>
+
+      {!loading && bookings.length === 0 ? (
+        <div className="empty-state">
+          <p>No appointments match these filters.</p>
+          {scope === 'upcoming' && !date && (
+            <button className="btn outline" onClick={() => { setScope('all'); setDate(''); }}>Show all dates</button>
+          )}
+        </div>
+      ) : (
+        <div className="portal-list">
+          {bookings.map((b) => (
+            <article className="portal-row" key={b.row}>
+              <div className="who">
+                <div className="row-title">
+                  <span>{b.name || 'Unnamed patient'}</span>
+                  <span className={'chip ' + b.status.toLowerCase()}>{STATUS_LABEL[b.status] || b.status}</span>
+                </div>
+                <div className="row-meta">
+                  <span><CalendarDays size={13} /> {prettyDate(b.date)}</span>
+                  <span><Clock3 size={13} /> {prettyTime(b.slot)}</span>
+                  <span><Phone size={13} /> {displayPhone(b.phone)}</span>
+                </div>
+              </div>
+              <div className="row-actions">
+                {b.status !== 'Confirmed' && b.status !== 'Cancelled' && (
+                  <button className="btn dark" disabled={busyRow === b.row} onClick={() => confirm(b)}>
+                    {busyRow === b.row ? 'Confirming…' : 'Confirm'}
+                  </button>
+                )}
+                {b.status !== 'Cancelled' && (
+                  <button className="btn outline" disabled={busyRow === b.row} onClick={() => cancel(b)}>Cancel</button>
+                )}
+                <a className="btn outline" href={whatsappLink(b.phone, confirmationMessage(b))} target="_blank" rel="noreferrer">
+                  <MessageCircle size={14} /> WhatsApp
+                </a>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      <p className="config-note">
+        Requests reserve the slot immediately. Confirming marks the patient confirmed and keeps the slot blocked.
+        Cancelling frees the slot for other patients.
+      </p>
+    </div>
+  );
+}
+
+function SlotsTab({ code, noteResult, flash, settings }) {
+  const [date, setDate] = useState(todayLocal());
+  const [day, setDay] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+
+  async function load() {
+    setLoading(true);
+    setError('');
+    const result = await callApi({ action: 'getDay', code, date });
+    setLoading(false);
+    if (noteResult(result)) return;
+    if (result.ok) setDay(result);
+    else setError(result.message || 'Could not load this date.');
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [date]);
+
+  async function toggle(slot, isBlocked) {
+    setBusy(slot);
+    const result = await callApi({ action: isBlocked ? 'unblock' : 'block', code, date, slot });
+    setBusy('');
+    if (noteResult(result)) return;
+    if (result.ok) { flash(isBlocked ? 'Slot unblocked.' : 'Slot blocked.'); await load(); }
+    else setError(result.message || 'Could not update this slot.');
+  }
+
+  async function bulk(block) {
+    const label = block ? 'Block' : 'Unblock';
+    if (!window.confirm(label + ' all clinic slots on ' + prettyDate(date) + '?')) return;
+    setBusy('day');
+    const result = await callApi({ action: block ? 'blockDay' : 'unblockDay', code, date });
+    setBusy('');
+    if (noteResult(result)) return;
+    if (!result.ok) { setError(result.message || 'Could not update the day.'); return; }
+    await load();
+    if (block) {
+      flash(result.closed ? 'The clinic is closed on this date — nothing to block.' : 'Blocked ' + result.added + ' slot(s).');
+    } else {
+      flash('Unblocked ' + result.removed + ' slot(s).');
+    }
+  }
+
+  async function bulkWeek(block) {
+    const label = block ? 'Block' : 'Unblock';
+    if (!window.confirm(label + ' all clinic slots for 7 days starting ' + prettyDate(date) + '?')) return;
+    setBusy('week');
+    const result = await callApi({ action: block ? 'blockWeek' : 'unblockWeek', code, date });
+    setBusy('');
+    if (noteResult(result)) return;
+    if (!result.ok) { setError(result.message || 'Could not update the week.'); return; }
+    await load();
+    flash(block
+      ? 'Blocked ' + result.added + ' slot(s) across ' + result.days + ' day(s).'
+      : 'Unblocked ' + result.removed + ' slot(s) across ' + result.days + ' day(s).');
+  }
+
+  const slots = day && day.slots ? day.slots : [];
+  const extra = day && day.extraBlocked ? day.extraBlocked : [];
+
+  return (
+    <div>
+      <div className="filter-bar">
+        <label>
+          Date
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <button className="btn outline" onClick={() => setDate(todayLocal())}>Today</button>
+        <button className="btn outline" disabled={busy === 'day'} onClick={() => bulk(true)}>
+          <Ban size={14} /> {busy === 'day' ? 'Working…' : 'Block entire day'}
+        </button>
+        <button className="btn outline" disabled={busy === 'day'} onClick={() => bulk(false)}>Unblock entire day</button>
+        <button className="btn outline" disabled={busy === 'week'} onClick={() => bulkWeek(true)}>
+          <Ban size={14} /> {busy === 'week' ? 'Working…' : 'Block next 7 days'}
+        </button>
+        <button className="btn outline" disabled={busy === 'week'} onClick={() => bulkWeek(false)}>Unblock next 7 days</button>
+      </div>
+
+      {error && <div className="form-error"><AlertTriangle size={15} /> {error}</div>}
+
+      {loading ? (
+        <p className="hint">Loading…</p>
+      ) : day && day.closed ? (
+        <div className="notice">
+          <CalendarDays size={18} /> {closedText(day)}
+          <span className="notice-sub">Clinic hours: {daysLabel(settings)} · {hoursLabel(settings)}</span>
+        </div>
+      ) : slots.length === 0 && extra.length === 0 ? (
+        <div className="empty-state">
+          <p>No consultation times are configured for this date.</p>
+          <p className="hint">Check the Schedule tab, then try again.</p>
+        </div>
+      ) : (
+        <div className="portal-list">
+          {slots.map((s) => (
+            <div className={'portal-row slot-row ' + s.status} key={s.slot}>
+              <div className="who">
+                <div className="row-title">
+                  <span>{prettyTime(s.slot)}</span>
+                  <span className={'chip ' + s.status}>{s.status === 'booked' ? 'Booked' : s.status === 'blocked' ? 'Blocked' : 'Open'}</span>
+                </div>
+                {s.status === 'booked' && (
+                  <div className="row-meta">
+                    <span>{s.name || 'Patient'}</span>
+                    <span><Phone size={13} /> {displayPhone(s.phone)}</span>
+                    <span>{s.bookingStatus}</span>
+                  </div>
+                )}
+              </div>
+              <div className="row-actions">
+                {s.status !== 'booked' && (
+                  <button className="btn outline" disabled={busy === s.slot} onClick={() => toggle(s.slot, s.status === 'blocked')}>
+                    {busy === s.slot ? '…' : s.status === 'blocked' ? 'Unblock' : (<><Ban size={14} /> Block</>)}
+                  </button>
+                )}
+                {s.status === 'booked' && <span className="config-note">Cancel the appointment to free this slot.</span>}
+              </div>
+            </div>
+          ))}
+          {extra.map((s) => (
+            <div className="portal-row slot-row blocked" key={'extra-' + s.slot}>
+              <div className="who">
+                <div className="row-title">
+                  <span>{prettyTime(s.slot)}</span>
+                  <span className="chip blocked">Blocked (outside current hours)</span>
+                </div>
+              </div>
+              <div className="row-actions">
+                <button className="btn outline" disabled={busy === s.slot} onClick={() => toggle(s.slot, true)}>Unblock</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="legend" style={{ marginTop: 16 }}>
+        <span><i className="dot-open" /> Open</span>
+        <span><i className="dot-booked" /> Booked</span>
+        <span><i className="dot-blocked" /> Blocked</span>
+      </div>
+      <p className="config-note">Blocked and booked slots are hidden from patients on the public booking form.</p>
+    </div>
+  );
+}
+
+function SettingsTab({ code, noteResult, flash, settings, setSettings }) {
+  const [draft, setDraft] = useState(hydrateSettings(settings));
+  const [closedTextValue, setClosedTextValue] = useState((settings.extraClosedDates || []).join(', '));
+  const [holidays, setHolidays] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
   useEffect(() => {
-    const h = () => setRoute(window.location.hash);
-    window.addEventListener('hashchange', h);
-    return () => window.removeEventListener('hashchange', h);
+    setLoading(true);
+    callApi({ action: 'getSettings', code }).then((result) => {
+      setLoading(false);
+      if (noteResult(result)) return;
+      if (result.ok) {
+        const fresh = hydrateSettings(result.settings);
+        setDraft(fresh);
+        setSettings(fresh);
+        setClosedTextValue((fresh.extraClosedDates || []).join(', '));
+        setHolidays(result.holidays || {});
+      } else {
+        setError(result.message || 'Could not load the schedule.');
+      }
+    });
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
-  if (route.startsWith('#/sree-clinic-admin')) return <SreeAdminPortal config={config} setConfig={setConfig} />;
+
+  function update(patch) {
+    setDraft((d) => ({ ...d, ...patch }));
+    setSaved(false);
+  }
+
+  function toggleDay(index) {
+    setDraft((d) => {
+      const has = d.days.indexOf(index) !== -1;
+      return { ...d, days: has ? d.days.filter((x) => x !== index) : d.days.concat(index) };
+    });
+    setSaved(false);
+  }
+
+  async function save(e) {
+    e.preventDefault();
+    setError('');
+    setSaved(false);
+    const dates = closedTextValue.split(/[,\s]+/).map((s) => s.trim()).filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s));
+    if (closedTextValue.trim() && dates.length === 0) {
+      setError('Closed dates must look like 2026-12-31, separated by commas.');
+      return;
+    }
+    const payload = { ...draft, extraClosedDates: dates };
+    setSaving(true);
+    const result = await callApi({ action: 'saveSettings', code, settings: payload });
+    setSaving(false);
+    if (noteResult(result)) return;
+    if (!result.ok) { setError(result.message || 'Could not save the schedule.'); return; }
+    const fresh = hydrateSettings(result.settings);
+    setDraft(fresh);
+    setSettings(fresh);
+    setClosedTextValue((fresh.extraClosedDates || []).join(', '));
+    setSaved(true);
+    flash('Schedule saved. Patients see the new hours immediately.');
+  }
+
+  const holidayEntries = useMemo(() => Object.keys(holidays).sort().map((d) => [d, holidays[d]]), [holidays]);
+
+  if (loading) return <p className="hint">Loading schedule…</p>;
+
+  return (
+    <form className="settings-form" onSubmit={save}>
+      <div className="notice">
+        <ShieldCheck size={18} /> Changes take effect immediately on the public booking form.
+      </div>
+
+      <label className="switchline">
+        Accept online appointment requests
+        <input type="checkbox" checked={draft.enabled} onChange={(e) => update({ enabled: e.target.checked })} />
+      </label>
+
+      <label>Consultation days</label>
+      <div className="days">
+        {DAYS.map((d, i) => (
+          <button type="button" key={d} className={draft.days.indexOf(i) !== -1 ? 'day active' : 'day'} onClick={() => toggleDay(i)}>{d}</button>
+        ))}
+      </div>
+
+      <div className="two">
+        <label>
+          Opening time
+          <input type="time" value={draft.start} onChange={(e) => update({ start: e.target.value })} required />
+        </label>
+        <label>
+          Closing time
+          <input type="time" value={draft.end} onChange={(e) => update({ end: e.target.value })} required />
+        </label>
+      </div>
+
+      <div className="two">
+        <label>
+          Appointment duration
+          <select value={draft.duration} onChange={(e) => update({ duration: Number(e.target.value) })}>
+            {[10, 15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m} minutes</option>)}
+          </select>
+        </label>
+        <label>
+          Buffer between patients (min)
+          <input type="number" min="0" max="60" value={draft.buffer} onChange={(e) => update({ buffer: Number(e.target.value) })} />
+        </label>
+      </div>
+
+      <div className="two">
+        <label>
+          Break starts (optional)
+          <input type="time" value={draft.breakStart} onChange={(e) => update({ breakStart: e.target.value })} />
+        </label>
+        <label>
+          Break ends (optional)
+          <input type="time" value={draft.breakEnd} onChange={(e) => update({ breakEnd: e.target.value })} />
+        </label>
+      </div>
+
+      <div className="two">
+        <label>
+          Consultation fee (optional)
+          <input value={draft.fee} maxLength={40} onChange={(e) => update({ fee: e.target.value })} placeholder="e.g. ₹600" />
+        </label>
+        <label>
+          Extra closed dates
+          <input value={closedTextValue} onChange={(e) => { setClosedTextValue(e.target.value); setSaved(false); }} placeholder="2026-12-31, 2027-01-01" />
+        </label>
+      </div>
+
+      <label className="switchline">
+        Stay open on gazetted public holidays
+        <input type="checkbox" checked={draft.ignoreHolidays} onChange={(e) => update({ ignoreHolidays: e.target.checked })} />
+      </label>
+      <p className="config-note">Leave this off to close automatically on India's gazetted holidays.</p>
+
+      {error && <div className="form-error"><AlertTriangle size={15} /> {error}</div>}
+      {saved && <div className="form-ok"><CheckCircle2 size={15} /> Schedule saved.</div>}
+
+      <button className="btn dark full" disabled={saving}>{saving ? 'Saving…' : 'Save schedule'}</button>
+
+      {holidayEntries.length > 0 && (
+        <details className="holiday-details">
+          <summary>View gazetted holiday closures ({holidayEntries.length})</summary>
+          <div className="holiday-list">
+            {holidayEntries.map(([d, name]) => (
+              <span key={d}><b>{prettyDate(d)}</b> · {name}</span>
+            ))}
+          </div>
+        </details>
+      )}
+    </form>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Main site                                                           */
+/* ------------------------------------------------------------------ */
+
+export default function App() {
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [route, setRoute] = useState(() => window.location.hash);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+
+  useEffect(() => {
+    const onHash = () => setRoute(window.location.hash);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  useEffect(() => {
+    callApi({ action: 'getConfig' }, { get: true }).then((result) => {
+      if (result.ok && result.settings) setSettings(hydrateSettings(result.settings));
+    });
+  }, []);
+
+  if (route.indexOf('#/sree-clinic-admin') === 0) {
+    return (
+      <StaffPortal
+        settings={settings}
+        setSettings={setSettings}
+        onExit={() => { window.location.hash = '#top'; }}
+      />
+    );
+  }
+
+  const sree = LOCATIONS[2];
+
   return (
     <main>
       <header className="nav">
@@ -535,8 +1073,9 @@ export default function App() {
           <a href="#contact" onClick={() => setMenu(false)}>Contact</a>
         </nav>
         <a className="nav-cta" href="#locations">Book a consultation <ArrowUpRight size={15} /></a>
-        <button className="mobile-menu" onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button>
+        <button className="mobile-menu" onClick={() => setMenu(!menu)} aria-label="Toggle menu">{menu ? <X /> : <Menu />}</button>
       </header>
+
       <section className="hero" id="top">
         <div className="hero-copy">
           <span className="eyebrow"><span className="dot" /> WOMEN’S HEALTH · BENGALURU</span>
@@ -557,21 +1096,23 @@ export default function App() {
         <div className="portrait-wrap">
           <div className="portrait-frame">
             <img src={PROFILE.photo} alt="Dr. Swetha Vinjamuri" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-            <div className="portrait-fallback">Dr. Swetha<br/>Vinjamuri</div>
+            <div className="portrait-fallback">Dr. Swetha<br />Vinjamuri</div>
           </div>
           <div className="portrait-caption">
             <span>DR. SWETHA VINJAMURI</span>
-            <small>Obstetrician & Gynaecologist</small>
+            <small>Obstetrician &amp; Gynaecologist</small>
           </div>
           <div className="floating-note">
             <HeartPulse size={18} />
-            <span>Evidence-based care<br/><b>with a personal touch</b></span>
+            <span>Evidence-based care<br /><b>with a personal touch</b></span>
           </div>
         </div>
       </section>
+
       <section className="ticker">
         <span>OBSTETRICS</span><b>✳</b><span>GYNAECOLOGY</span><b>✳</b><span>WOMEN’S WELLNESS</span><b>✳</b><span>REPRODUCTIVE HEALTH</span>
       </section>
+
       <section className="section about" id="about">
         <div className="section-kicker">01 / ABOUT THE DOCTOR</div>
         <div className="about-grid">
@@ -581,21 +1122,16 @@ export default function App() {
             <p className="muted">Her approach centres on listening carefully, understanding individual needs and providing clear, evidence-based guidance so patients can make informed decisions about their health.</p>
             <div className="credential">
               <GraduationCap />
-              <div>
-                <b>Qualifications</b>
-                <span>{PROFILE.qualifications.join('  ·  ')}</span>
-              </div>
+              <div><b>Qualifications</b><span>{PROFILE.qualifications.join('  ·  ')}</span></div>
             </div>
             <div className="credential">
               <ShieldCheck />
-              <div>
-                <b>Professional registration</b>
-                <span>{PROFILE.registration} · Memberships: BSOG and Indian Menopause Society</span>
-              </div>
+              <div><b>Professional registration</b><span>{PROFILE.registration} · Memberships: BSOG and Indian Menopause Society</span></div>
             </div>
           </div>
         </div>
       </section>
+
       <section className="section expertise" id="expertise">
         <div className="section-kicker">02 / AREAS OF CARE</div>
         <div className="section-head">
@@ -613,6 +1149,7 @@ export default function App() {
           ))}
         </div>
       </section>
+
       <section className="section locations" id="locations">
         <div className="section-kicker">03 / CONSULTATION LOCATIONS</div>
         <div className="section-head">
@@ -631,73 +1168,62 @@ export default function App() {
               <h4>{l.area}</h4>
               <p>{l.address}</p>
               <div className="loc-bottom">
-                <small>{l.detail}</small>
+                <small>{l.id === 'sree' ? daysLabel(settings) + ' · ' + hoursLabel(settings) : l.detail}</small>
                 {l.external ? (
                   <a className="btn outline" href={l.link} target="_blank" rel="noreferrer">Visit booking page <ArrowUpRight size={16} /></a>
                 ) : (
-                  <button className="btn dark" onClick={() => setBooking(true)}>Request appointment <ArrowUpRight size={16} /></button>
+                  <button className="btn dark" onClick={() => setBookingOpen(true)}>Request appointment <ArrowUpRight size={16} /></button>
                 )}
               </div>
             </article>
           ))}
         </div>
-        <p className="location-note">Cloudnine appointments are handled by Cloudnine. Sree Women’s Clinic online booking will become active after the clinic confirms its schedule and the secure booking integrations are configured.</p>
+        <p className="location-note">Online requests for Sree Women’s Clinic are reviewed by the clinic. Your appointment is confirmed by phone or WhatsApp. Cloudnine appointments are handled by Cloudnine.</p>
       </section>
+
       <section className="section languages">
         <div>
           <div className="section-kicker">04 / COMMUNICATION</div>
           <h2>Care in a language<br /><em>you’re comfortable with.</em></h2>
         </div>
         <div className="language-list">
-          {PROFILE.languages.map((x) => (
-            <span key={x}><Languages size={15} /> {x}</span>
-          ))}
+          {PROFILE.languages.map((x) => <span key={x}><Languages size={15} /> {x}</span>)}
         </div>
       </section>
+
       <section className="section contact" id="contact">
         <div>
           <span className="eyebrow light">YOUR HEALTH, YOUR QUESTIONS</span>
-          <h2>Start with a<br /><em>a conversation.</em></h2>
+          <h2>Start with<br /><em>a conversation.</em></h2>
           <p>Choose a consultation location to view the appropriate appointment route.</p>
           <a className="btn light-btn" href="#locations">Explore locations <ArrowUpRight size={17} /></a>
         </div>
         <div className="contact-side">
           <div>
             <Phone />
-            <span>
-              <small>Cloudnine appointment assistance</small>
-              <br />
-              <b>+91 99728 99728</b>
-            </span>
+            <span><small>Cloudnine appointment assistance</small><br /><b>+91 99728 99728</b></span>
           </div>
           <div>
             <MapPin />
-            <span>
-              <small>Practice locations</small>
-              <br />
-              <b>HRBR Layout · Thanisandra</b>
-            </span>
+            <span><small>Practice locations</small><br /><b>HRBR Layout · Thanisandra</b></span>
           </div>
           <div>
             <CalendarDays />
-            <span>
-              <small>Clinic appointment</small>
-              <br />
-              <b>Sree Women’s Clinic</b>
-            </span>
+            <span><small>Sree Women’s Clinic</small><br /><b>{daysLabel(settings)} · {hoursLabel(settings)}</b></span>
           </div>
         </div>
       </section>
+
       <footer>
         <a className="brand" href="#top">SV<span>.</span></a>
-        <p>Dr. Swetha Vinjamuri · Obstetrician & Gynaecologist · Bengaluru</p>
+        <p>Dr. Swetha Vinjamuri · Obstetrician &amp; Gynaecologist · Bengaluru</p>
         <span style={{ display: 'flex', gap: 14 }}>
           <a className="admin-link" href="#/sree-clinic-admin">Clinic staff portal</a>
         </span>
         <span>© {new Date().getFullYear()} · All rights reserved</span>
       </footer>
-      {booking && <BookingModal onClose={() => setBooking(false)} config={config} />}
-      {admin && <SreeAdminPortal config={config} setConfig={setConfig} />}
+
+      {bookingOpen && <BookingModal settings={settings} onClose={() => setBookingOpen(false)} />}
     </main>
   );
 }
