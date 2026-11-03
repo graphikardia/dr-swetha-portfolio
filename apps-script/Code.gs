@@ -371,8 +371,9 @@ function handleConfirm(body) {
     if (row < 2) {
       return fail('not_found', 'That booking could not be found. Refresh the list and try again.');
     }
+    // A New/Confirmed booking already reserves the slot (readBookedMap), so
+    // this does not add a manual block row; manual blocks stay independent.
     sheet.getRange(row, 6).setValue('Confirmed');
-    addBlock(ss, date, slot);
     return { ok: true, row: row };
   } finally {
     lock.releaseLock();
@@ -395,7 +396,8 @@ function handleCancel(body) {
     }
     sheet.getRange(row, 6).setValue('Cancelled');
 
-    // Free the slot if no other active booking uses it.
+    // Cancelling frees the booking's hold on the slot. Any manual block the
+    // doctor placed remains in place.
     var stillUsed = false;
     for (var i = 1; i < rows.length; i++) {
       if (i + 1 === row) continue;
@@ -404,8 +406,14 @@ function handleCancel(body) {
       if (st.toLowerCase() === 'cancelled') continue;
       if (normDate(r[1]) === date && normSlot(r[2]) === slot) { stillUsed = true; break; }
     }
-    if (!stillUsed) removeBlock(ss, date, slot);
-    return { ok: true, row: row, slotFreed: !stillUsed };
+    var slotBlocked = !!readBlockedSet(ss, date)[slot];
+    return {
+      ok: true,
+      row: row,
+      slotFreed: !stillUsed && !slotBlocked,
+      slotBlocked: slotBlocked,
+      stillBooked: stillUsed
+    };
   } finally {
     lock.releaseLock();
   }

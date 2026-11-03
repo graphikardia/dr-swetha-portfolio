@@ -627,7 +627,7 @@ function BookingsTab({ code, noteResult, flash }) {
     }
 
     await load();
-    flash('Appointment confirmed and slot blocked.');
+    flash('Appointment confirmed. The slot is now booked.');
     if (win) win.location.href = whatsappLink(booking.phone, confirmationMessage(booking));
     else setError('Confirmed. Allow pop-ups, or use the WhatsApp button on the row to message the patient.');
   }
@@ -640,7 +640,13 @@ function BookingsTab({ code, noteResult, flash }) {
     if (noteResult(result)) return;
     if (!result.ok) { setError(result.message || 'Could not cancel this appointment.'); return; }
     await load();
-    flash(result.slotFreed ? 'Appointment cancelled. The slot is free again.' : 'Appointment cancelled.');
+    flash(
+      result.slotFreed
+        ? 'Appointment cancelled. The slot is free again.'
+        : result.slotBlocked
+          ? 'Appointment cancelled. The slot remains manually blocked.'
+          : 'Appointment cancelled. Another booking still holds that slot.'
+    );
   }
 
   return (

@@ -35,9 +35,11 @@ to Date/time values.
 
 ## Statuses
 
-- `New` — public request; the slot is reserved.
-- `Confirmed` — staff confirmed; the slot stays blocked.
-- `Cancelled` — slot is freed automatically.
+- `New` — public request; the slot is reserved (shown as booked).
+- `Confirmed` — staff confirmed; the booking itself keeps the slot booked.
+  Confirming does **not** add a manual `BlockedSlots` row.
+- `Cancelled` — the booking's hold is released. A manual block the doctor
+  placed on that slot/day/week remains in force.
 
 ## Endpoints
 
