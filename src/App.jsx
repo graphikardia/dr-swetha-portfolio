@@ -177,7 +177,7 @@ async function callApi(payload, options) {
     if (err && err.name === 'AbortError') {
       return { ok: false, error: 'timeout', message: 'The booking service took too long to respond. Please try again.' };
     }
-    return { ok: false, error: 'network', message: 'Could not reach the booking service. Check your internet connection and try again.' };
+    return { ok: false, error: 'network', message: 'Could not reach the booking service. Check your connection and try again, or contact the clinic directly.' };
   } finally {
     clearTimeout(timer);
   }
@@ -212,6 +212,12 @@ function BookingModal({ settings, onClose }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, []);
 
   useEffect(() => {
     if (!date) {
@@ -429,10 +435,12 @@ function closedText(avail) {
 /* ------------------------------------------------------------------ */
 
 function StaffPortal({ settings, setSettings, onExit }) {
-  const savedCode = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STAFF_KEY) : '';
-  const [code, setCode] = useState(savedCode || '');
+  const [initialCode] = useState(() => {
+    try { return sessionStorage.getItem(STAFF_KEY) || ''; } catch (err) { return ''; }
+  });
+  const [code, setCode] = useState(initialCode);
   const [authed, setAuthed] = useState(false);
-  const [checking, setChecking] = useState(!!savedCode);
+  const [checking, setChecking] = useState(!!initialCode);
   const [passcode, setPasscode] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
@@ -461,13 +469,19 @@ function StaffPortal({ settings, setSettings, onExit }) {
   }
 
   useEffect(() => {
-    if (!savedCode) { setChecking(false); return; }
-    callApi({ action: 'staffLogin', code: savedCode }).then((r) => {
-      if (r.ok) { setCode(savedCode); setAuthed(true); }
-      else { sessionStorage.removeItem(STAFF_KEY); setCode(''); }
+    if (!initialCode) { setChecking(false); return undefined; }
+    let live = true;
+    callApi({ action: 'staffLogin', code: initialCode }).then((r) => {
+      if (!live) return;
+      if (r.ok) { setCode(initialCode); setAuthed(true); }
+      else {
+        try { sessionStorage.removeItem(STAFF_KEY); } catch (err) { /* ignore */ }
+        setCode('');
+      }
       setChecking(false);
     });
-  }, [savedCode]);
+    return () => { live = false; };
+  }, [initialCode]);
 
   async function login(e) {
     e.preventDefault();
@@ -1039,7 +1053,7 @@ export default function App() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
   useEffect(() => {
-    const onHash = () => setRoute(window.location.hash);
+    const onHash = () => { setRoute(window.location.hash); window.scrollTo(0, 0); };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);

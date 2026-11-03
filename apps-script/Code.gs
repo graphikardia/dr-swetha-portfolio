@@ -809,14 +809,40 @@ function isStaff(code) {
 
 function getOrCreateSheet(ss, name, headers) {
   var sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
+  var created = false;
+  if (!sheet) { sheet = ss.insertSheet(name); created = true; }
+  if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
+    created = true;
+  }
+  if (created) {
     if (name === BOOKINGS_TAB) applyTextFormats(sheet, [2, 3, 5]);
     if (name === BLOCKED_TAB) applyTextFormats(sheet, [1, 2]);
   }
   return sheet;
+}
+
+/**
+ * Run this once from the Apps Script editor after pasting this file.
+ * It triggers the Google authorisation prompt (Sheets + Gmail) and creates
+ * any missing tabs.
+ */
+function setupCheck() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  getOrCreateSheet(ss, BOOKINGS_TAB, BOOKING_HEADERS);
+  getOrCreateSheet(ss, BLOCKED_TAB, BLOCK_HEADERS);
+  getOrCreateSheet(ss, SETTINGS_TAB, SETTINGS_HEADERS);
+  var summary = 'OK: ' + ss.getName() + ' | settings=' + JSON.stringify(readSettings(ss));
+  Logger.log(summary);
+  return summary;
+}
+
+/** Quick health check. Run from the editor, or open the /exec?action=ping URL. */
+function testPing() {
+  var body = doGet({ parameter: { action: 'ping' } }).getContent();
+  Logger.log(body);
+  return body;
 }
 
 function applyTextFormats(sheet, columns) {
