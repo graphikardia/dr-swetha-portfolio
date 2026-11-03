@@ -56,6 +56,8 @@ const DEFAULT_SETTINGS = {
 };
 
 // India gazetted / public holidays (clinic closed unless "ignoreHolidays" is on).
+// 34 gazetted observances across 2026-2027. Independence Day and Milad-un-Nabi
+// both fall on 2027-08-15, so there are 33 unique closure dates.
 const HOLIDAYS = {
   '2026-01-26': 'Republic Day',
   '2026-03-04': 'Holi',
@@ -83,7 +85,7 @@ const HOLIDAYS = {
   '2027-05-17': 'Id-ul-Zuha / Bakrid',
   '2027-05-20': 'Buddha Purnima',
   '2027-06-16': 'Muharram',
-  '2027-08-15': 'Independence Day',
+  '2027-08-15': 'Independence Day / Milad-un-Nabi',
   '2027-08-25': 'Janmashtami',
   '2027-10-02': "Mahatma Gandhi's Birthday",
   '2027-10-09': 'Dussehra / Vijayadashami',
@@ -462,18 +464,22 @@ function handleBlockDay(body, block) {
   try { lock.waitLock(30000); } catch (err) { return fail('busy', 'Please try again.'); }
 
   try {
-    getOrCreateSheet(ss, BLOCKED_TAB, BLOCK_HEADERS);
-    applyTextFormats(ss.getSheetByName(BLOCKED_TAB), [1, 2]);
+    var sheet = getOrCreateSheet(ss, BLOCKED_TAB, BLOCK_HEADERS);
+    applyTextFormats(sheet, [1, 2]);
     if (block) {
-      var map = readBlockedSet(ss, date);
-      var added = 0;
+      var existing = readBlockedRows(sheet);
+      var map = {};
+      for (var r = 0; r < existing.length; r++) map[existing[r].date + '|' + existing[r].slot] = true;
+      var additions = [];
       for (var i = 0; i < slots.length; i++) {
-        if (!map[slots[i]]) { addBlock(ss, date, slots[i]); added++; }
+        var key = date + '|' + slots[i];
+        if (!map[key]) { map[key] = true; additions.push({ date: date, slot: slots[i] }); }
       }
-      return { ok: true, added: added, total: slots.length, closed: slots.length === 0 };
+      appendBlockRows(sheet, additions);
+      return { ok: true, added: additions.length, total: slots.length, closed: slots.length === 0 };
     }
-    var removed = removeBlocksForDate(ss, date);
-    return { ok: true, removed: removed };
+    var removed = removeBlockRows(sheet, function (d) { return d === date; });
+    return { ok: true, removed: removed.removed, days: removed.days };
   } finally {
     lock.releaseLock();
   }
@@ -488,28 +494,30 @@ function handleBlockWeek(body, block) {
   try { lock.waitLock(30000); } catch (err) { return fail('busy', 'Please try again.'); }
 
   try {
-    getOrCreateSheet(ss, BLOCKED_TAB, BLOCK_HEADERS);
-    applyTextFormats(ss.getSheetByName(BLOCKED_TAB), [1, 2]);
-    var added = 0;
-    var removed = 0;
-    var daysTouched = 0;
-    for (var n = 0; n < 7; n++) {
-      var d = addDays(start, n);
-      if (block) {
+    var sheet = getOrCreateSheet(ss, BLOCKED_TAB, BLOCK_HEADERS);
+    applyTextFormats(sheet, [1, 2]);
+    if (block) {
+      var existing = readBlockedRows(sheet);
+      var map = {};
+      for (var r = 0; r < existing.length; r++) map[existing[r].date + '|' + existing[r].slot] = true;
+      var additions = [];
+      var daysTouched = 0;
+      for (var n = 0; n < 7; n++) {
+        var d = addDays(start, n);
         var slots = makeSlots(d, settings);
         if (!slots.length) continue;
         daysTouched++;
-        var map = readBlockedSet(ss, d);
         for (var i = 0; i < slots.length; i++) {
-          if (!map[slots[i]]) { addBlock(ss, d, slots[i]); added++; }
+          var key = d + '|' + slots[i];
+          if (!map[key]) { map[key] = true; additions.push({ date: d, slot: slots[i] }); }
         }
-      } else {
-        var count = removeBlocksForDate(ss, d);
-        if (count) daysTouched++;
-        removed += count;
       }
+      appendBlockRows(sheet, additions);
+      return { ok: true, added: additions.length, removed: 0, days: daysTouched };
     }
-    return { ok: true, added: added, removed: removed, days: daysTouched };
+    var end = addDays(start, 6);
+    var removed = removeBlockRows(sheet, function (d) { return d >= start && d <= end; });
+    return { ok: true, added: 0, removed: removed.removed, days: removed.days };
   } finally {
     lock.releaseLock();
   }
@@ -534,25 +542,60 @@ function removeBlock(ss, date, slot) {
   }
 }
 
-function removeBlocksForDate(ss, date) {
-  var sheet = getOrCreateSheet(ss, BLOCKED_TAB, BLOCK_HEADERS);
+function readBlockedRows(sheet) {
   var rows = sheet.getDataRange().getValues();
+  var out = [];
+  for (var i = 1; i < rows.length; i++) {
+    var d = normDate(rows[i][0]);
+    var s = normSlot(rows[i][1]);
+    if (d || s) out.push({ date: d, slot: s });
+  }
+  return out;
+}
+
+function appendBlockRows(sheet, entries) {
+  if (!entries.length) return;
+  var values = [];
+  for (var i = 0; i < entries.length; i++) values.push([entries[i].date, entries[i].slot]);
+  var start = Math.max(sheet.getLastRow() + 1, 2);
+  sheet.getRange(start, 1, values.length, 2).setValues(values);
+}
+
+function removeBlockRows(sheet, predicate) {
+  var rows = sheet.getDataRange().getValues();
+  var keep = [BLOCK_HEADERS];
   var removed = 0;
-  for (var i = rows.length - 1; i >= 1; i--) {
-    if (normDate(rows[i][0]) === date) {
-      sheet.deleteRow(i + 1);
+  var days = {};
+  for (var i = 1; i < rows.length; i++) {
+    var d = normDate(rows[i][0]);
+    var s = normSlot(rows[i][1]);
+    if (!d && !s) continue;
+    if (predicate(d, s)) {
       removed++;
+      if (d) days[d] = true;
+    } else {
+      keep.push([d, s]);
     }
   }
-  return removed;
+  if (removed) {
+    // One write: keep the header + remaining rows, blank out the tail.
+    while (keep.length < rows.length) keep.push(['', '']);
+    sheet.getRange(1, 1, rows.length, 2).setValues(keep);
+  }
+  return { removed: removed, days: Object.keys(days).length };
+}
+
+function removeBlocksForDate(ss, date) {
+  var sheet = getOrCreateSheet(ss, BLOCKED_TAB, BLOCK_HEADERS);
+  return removeBlockRows(sheet, function (d) { return d === date; }).removed;
 }
 
 function readBlockedSet(ss, date) {
   var sheet = getOrCreateSheet(ss, BLOCKED_TAB, BLOCK_HEADERS);
-  var rows = sheet.getDataRange().getValues();
+  var rows = readBlockedRows(sheet);
   var map = {};
-  for (var i = 1; i < rows.length; i++) {
-    if (normDate(rows[i][0]) === date) map[normSlot(rows[i][1])] = true;
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].date === date) map[rows[i].slot] = true;
   }
   return map;
 }
